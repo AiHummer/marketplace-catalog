@@ -69,6 +69,16 @@ hex chars of `sha256(raw public key)`.
 - **Release identity signed** = the bytes `slug \x00 version \x00 artifact_url`
   (matches core's `SignedPayload(slug, version, source_ref)`).
 
+#### Store-page manifest fields
+
+For a **public** submission the embedded `manifest` must also carry store-page
+metadata:
+- `manifest.description` — **required**, a non-empty string describing the plugin.
+- `manifest.icon` — **required**, a non-empty string: an `https://` URL or a
+  `data:` URI for the plugin icon.
+- `manifest.screenshots` — **optional**, an array of non-empty `https://` URL
+  strings.
+
 ## Validation (what CI checks)
 
 Run it yourself before opening a PR:
@@ -79,6 +89,9 @@ node scripts/validate.mjs catalog/acme/hello-tool/plugin.json
 For each changed submission the validator enforces:
 - all required fields present and correctly typed; `namespaced_slug == @publisher/slug`;
   `channel ∈ {stable,beta}`; non-empty `license`.
+- store-page fields on `manifest`: non-empty `description` (**required**),
+  non-empty `icon` (**required**, https URL or data URI), and — if present —
+  `screenshots` must be an array of non-empty strings.
 - the publisher is registered (`publishers/<publisher>.json`) and
   `publisher_key_id` matches it.
 - the `signature` verifies (ed25519) against the registered public key over
@@ -105,6 +118,28 @@ The publish job counter-signs each release with `REGISTRY_SIGNING_KEY`, injects
 the signature as `manifest.signature`, and uploads `catalog.json` via `mc`
 (MinIO client) or `aws s3`.
 
+## AI review configuration (free / local — no paid model API)
+
+The advisory AI review (`ai-review.yml`) calls a generic **OpenAI-compatible**
+`POST {BASE_URL}/chat/completions` endpoint, so you can wire it to any
+**free or self-hosted** provider — aligning with AiHummer's "free/local models,
+no paid model APIs" principle. Configure:
+
+| Name | Kind | What it is |
+| --- | --- | --- |
+| `AI_REVIEW_BASE_URL` | repo **variable** (secret override allowed) | OpenAI-compatible base URL, e.g. `https://api.groq.com/openai/v1`. |
+| `AI_REVIEW_MODEL` | repo **variable** | model id, e.g. `llama-3.3-70b-versatile`. |
+| `AI_REVIEW_API_KEY` | repo **secret** | the endpoint's API key. |
+
+If `AI_REVIEW_BASE_URL` **or** `AI_REVIEW_API_KEY` is empty, the review **skips
+and exits 0** (advisory-only, never blocks).
+
+Recommended free options:
+- **Groq free API** — `https://api.groq.com/openai/v1`, a free API key with **no
+  card required**; e.g. model `llama-3.3-70b-versatile`.
+- **Self-hosted AiHummer gateway / Ollama** — `http://<host>/v1`, fully
+  local/free; pick any served model id.
+
 ## Moderation
 
 This is a public registry that accepts untrusted submissions. The policy is
@@ -114,8 +149,10 @@ maintainer always makes the final merge decision. See
 maintainer-merge chokepoint → AI-assist review → CODEOWNERS + checklist → trust
 tiers → post-publish revoke + abuse reports).
 
-The AI review (`ai-review.yml`) is gated on the **`ANTHROPIC_API_KEY`** repo
-secret; absent ⇒ it skips and exits 0.
+The AI review (`ai-review.yml`) is gated on **`AI_REVIEW_BASE_URL`** +
+**`AI_REVIEW_API_KEY`** (any OpenAI-compatible endpoint — recommend a free Groq
+key or a self-hosted AiHummer gateway / Ollama; see *AI review configuration*
+above); absent ⇒ it skips and exits 0.
 
 ## Contributing
 

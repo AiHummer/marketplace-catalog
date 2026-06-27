@@ -6,10 +6,16 @@
 // changed catalog/**/plugin.json files from the GitHub API (data, not code) and
 // optionally downloads the author-hosted artifact for STATIC inspection only
 // (listing + string scan). It never checks out, extracts-and-runs, or executes
-// any PR-controlled code. The only secret it uses (ANTHROPIC_API_KEY) is sent to
-// Anthropic; it is never handed to attacker-controlled code.
+// any PR-controlled code. The only secret it uses (AI_REVIEW_API_KEY) is sent to
+// the configured OpenAI-compatible endpoint; it is never handed to
+// attacker-controlled code.
 //
-// Env: GH_TOKEN, ANTHROPIC_API_KEY, PR_NUMBER, REPO (owner/name).
+// The reviewer calls a generic OpenAI-compatible POST {BASE_URL}/chat/completions
+// endpoint, so it works with any free/local provider (e.g. Groq's free API, or a
+// self-hosted AiHummer gateway / Ollama) — no paid model API required.
+//
+// Env: GH_TOKEN, AI_REVIEW_BASE_URL, AI_REVIEW_MODEL, AI_REVIEW_API_KEY,
+//      PR_NUMBER, REPO (owner/name).
 // Zero npm deps — uses fetch + child_process(gh) only.
 
 import { execFileSync } from "node:child_process";
@@ -17,13 +23,22 @@ import { mkdtempSync, readFileSync, writeFileSync, existsSync, statSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const MODEL = "claude-opus-4-8";
-const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
-const ANTHROPIC_VERSION = "2023-06-01";
+const {
+  GH_TOKEN,
+  AI_REVIEW_BASE_URL,
+  AI_REVIEW_MODEL,
+  AI_REVIEW_API_KEY,
+  PR_NUMBER,
+  REPO,
+} = process.env;
 
-const { GH_TOKEN, ANTHROPIC_API_KEY, PR_NUMBER, REPO } = process.env;
-if (!ANTHROPIC_API_KEY) {
-  console.log("AI review skipped: set ANTHROPIC_API_KEY to enable.");
+const BASE_URL = (AI_REVIEW_BASE_URL || "").trim().replace(/\/+$/, "");
+const MODEL = (AI_REVIEW_MODEL || "").trim() || "llama-3.3-70b-versatile";
+
+if (!BASE_URL || !(AI_REVIEW_API_KEY || "").trim()) {
+  console.log(
+    "AI review skipped: set AI_REVIEW_BASE_URL + AI_REVIEW_API_KEY (e.g. a free Groq key) to enable."
+  );
   process.exit(0);
 }
 if (!GH_TOKEN || !PR_NUMBER || !REPO) {
@@ -103,31 +118,41 @@ async function staticInspectArtifact(url) {
   }
 }
 
-async function callClaude(prompt) {
-  const res = await fetch(ANTHROPIC_URL, {
+const SYSTEM_PROMPT =
+  "You are the security/quality reviewer for the AiHummer PUBLIC plugin marketplace. " +
+  "You are ADVISORY only: a human maintainer makes the final merge decision. " +
+  "Be concise and specific, and answer in EXACTLY the structure requested.";
+
+// callReviewer — generic OpenAI-compatible chat completion. Works with any
+// endpoint exposing POST {BASE_URL}/chat/completions (Groq, Ollama, a
+// self-hosted AiHummer gateway, …). No paid model API required.
+async function callReviewer(prompt) {
+  const res = await fetch(`${BASE_URL}/chat/completions`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-api-key": ANTHROPIC_API_KEY,
-      "anthropic-version": ANTHROPIC_VERSION,
+      authorization: `Bearer ${AI_REVIEW_API_KEY}`,
     },
     body: JSON.stringify({
       model: MODEL,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.2,
       max_tokens: 1500,
-      messages: [{ role: "user", content: prompt }],
     }),
   });
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`Anthropic API ${res.status}: ${body.slice(0, 300)}`);
+    throw new Error(`AI review API ${res.status}: ${body.slice(0, 300)}`);
   }
   const data = await res.json();
-  return (data.content || []).map((b) => b.text || "").join("").trim();
+  return (data.choices?.[0]?.message?.content || "").trim();
 }
 
 function buildPrompt(submission, artifactSummary) {
   return [
-    "You are the security/quality reviewer for the AiHummer PUBLIC plugin marketplace.",
     "Assess the risk of the following plugin SUBMISSION. You are ADVISORY: a human",
     "maintainer makes the final merge decision. Be concise and specific.",
     "",
@@ -182,7 +207,7 @@ async function main() {
     const artifactSummary = await staticInspectArtifact(submission.artifact_url);
     let verdict;
     try {
-      verdict = await callClaude(buildPrompt(submission, artifactSummary));
+      verdict = await callReviewer(buildPrompt(submission, artifactSummary));
     } catch (e) {
       verdict = `AI review error: ${e.message}`;
     }

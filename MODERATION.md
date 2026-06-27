@@ -29,7 +29,8 @@ require a PR, require review from Code Owners, require the `validate` check to
 pass, disallow force-push to `main`.
 
 ### 3. AI-assist review (`ai-review.yml`)
-On each submission PR, an AI reviewer (`claude-opus-4-8`) assesses risk —
+On each submission PR, an AI reviewer (any OpenAI-compatible endpoint — a free
+Groq key or a self-hosted AiHummer gateway / Ollama; no paid model API) assesses risk —
 malware/obfuscation red flags, over-broad scope/egress, capability-vs-description
 mismatch, license issues — and posts a structured verdict (VERDICT / RISK /
 FINDINGS / MAINTAINER-NOTES) as a PR comment. It is **advisory only**: it
@@ -40,7 +41,9 @@ comments, never merges.
 > the changed `plugin.json` from the API (data, not code) and inspects the
 > author-hosted artifact **statically** (listing/strings) — it never
 > extracts-and-runs it. This avoids the classic `pull_request_target` secret-theft
-> attack. Gated on `ANTHROPIC_API_KEY`; absent ⇒ it skips and exits 0.
+> attack. Gated on `AI_REVIEW_BASE_URL` + `AI_REVIEW_API_KEY` (any
+> OpenAI-compatible endpoint — recommend a free Groq key or a self-hosted
+> AiHummer gateway / Ollama; see README); absent ⇒ it skips and exits 0.
 
 ### 4. CODEOWNERS + maintainer checklist
 `.github/CODEOWNERS` requires `@AiHummer/maintainers` review on `catalog/**`,

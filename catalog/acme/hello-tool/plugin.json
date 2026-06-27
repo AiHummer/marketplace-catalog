@@ -16,6 +16,9 @@
     "publisher_key_id": "bd68f2deedad25b1",
     "scope": "shared",
     "contract": "1",
+    "description": "A friendly demo tool that says hello via the Acme greetings API.",
+    "icon": "https://acme.example.com/plugins/hello-tool/icon.png",
+    "screenshots": ["https://acme.example.com/plugins/hello-tool/screenshot-1.png"],
     "capabilities": ["hello.say"],
     "config": [
       {

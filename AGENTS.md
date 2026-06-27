@@ -30,7 +30,7 @@ submissions + the CI that gates them.
 - `.github/PULL_REQUEST_TEMPLATE.md` — maintainer moderation checklist.
 - `MODERATION.md` — the six-layer moderation policy (AI-assist + mandatory human).
 - `.github/workflows/validate.yml` — runs the validator on PRs (`runs-on: ubuntu-latest` — hosted; untrusted PRs must not touch self-hosted infra).
-- `.github/workflows/ai-review.yml` — AI review on `pull_request_target` (hosted; gated on `ANTHROPIC_API_KEY`; never executes PR-head code).
+- `.github/workflows/ai-review.yml` — AI review on `pull_request_target` (hosted; calls any OpenAI-compatible endpoint, gated on `AI_REVIEW_BASE_URL` + `AI_REVIEW_API_KEY`; never executes PR-head code).
 - `.github/workflows/publish.yml` — counter-signs + uploads `catalog.json` on push to main (`ubuntu-latest`, trusted; secret-gated).
 
 ## 3. Change-impact map ← read before editing
@@ -41,7 +41,7 @@ submissions + the CI that gates them.
 | `scripts/validate.mjs` | keep it dependency-free and runnable as `node scripts/validate.mjs`; verify against the sample (pass) and a broken copy (fail) | every PR gate |
 | `scripts/build-catalog.mjs` | keep the output `{modules:[…]}` shape core's `SyncCatalog` consumes; keep `manifest.signature` = the registry counter-signature; keep `revoked.json` exclusion | every instance syncing the official catalog |
 | `revoked.json` | match an existing `namespaced_slug@version`; re-run publish to drop it | the official catalog (yanks a plugin) |
-| `.github/scripts/ai-review.mjs` or `ai-review.yml` | keep `pull_request_target` safety (NO PR-head checkout/exec); comment-only; gated on `ANTHROPIC_API_KEY` | privileged token safety; moderation |
+| `.github/scripts/ai-review.mjs` or `ai-review.yml` | keep `pull_request_target` safety (NO PR-head checkout/exec); comment-only; keep the generic OpenAI-compatible `/chat/completions` call gated on `AI_REVIEW_BASE_URL` + `AI_REVIEW_API_KEY` (no paid model API) | privileged token safety; moderation |
 | the registry key id / pinning | coordinate with core `internal/marketplace/trust.go` `RegistryPublicKeyB64` (id `7723a1e2b6ec925b`); rotating requires re-counter-signing the whole catalog | every operator's plugin trust |
 
 ## 4. Build · Test · Run
@@ -67,8 +67,11 @@ There is no tagged release. The "release" is the published `catalog.json`:
   the CDN.
 - `publish.yml` is **secret-gated**: missing secrets ⇒ prints a skip notice,
   exits 0. Required secrets: `REGISTRY_SIGNING_KEY`, `CDN_ENDPOINT`,
-  `CDN_ACCESS_KEY`, `CDN_SECRET_KEY`, `CDN_BUCKET`. AI review needs
-  `ANTHROPIC_API_KEY` (see README).
+  `CDN_ACCESS_KEY`, `CDN_SECRET_KEY`, `CDN_BUCKET`. AI review uses any
+  OpenAI-compatible endpoint (no paid model API): variables `AI_REVIEW_BASE_URL`
+  (e.g. free Groq `https://api.groq.com/openai/v1`, or self-hosted AiHummer
+  gateway / Ollama `http://<host>/v1`) + `AI_REVIEW_MODEL`, and secret
+  `AI_REVIEW_API_KEY` (see README).
 
 ## 6. Gotchas / non-obvious
 - **Never commit a private key.** The registry private key lives only in the

@@ -277,6 +277,27 @@ function validateSubmissionFile(file) {
     return;
   }
 
+  // store-page fields on the manifest (mirror core's public-submission contract):
+  // description + icon are REQUIRED for a public submission; screenshots optional.
+  const m = s.manifest;
+  if (typeof m.description !== "string" || m.description.trim() === "") {
+    err(file, `manifest.description is required for a public submission (non-empty string)`);
+    return;
+  }
+  if (typeof m.icon !== "string" || m.icon.trim() === "") {
+    err(file, `manifest.icon is required for a public submission (non-empty https URL or data URI string)`);
+    return;
+  }
+  if (m.screenshots !== undefined) {
+    if (
+      !Array.isArray(m.screenshots) ||
+      m.screenshots.some((x) => typeof x !== "string" || x.trim() === "")
+    ) {
+      err(file, `manifest.screenshots, when present, must be an array of non-empty strings`);
+      return;
+    }
+  }
+
   // basic security scan of the embedded manifest — high findings fail.
   const findings = scanManifest(s.manifest);
   let scanFailed = false;

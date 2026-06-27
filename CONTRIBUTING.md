@@ -46,6 +46,11 @@ this repo** — you sign every submission with it.
      "manifest": { "...full marketplace Manifest..." }
    }
    ```
+   The embedded `manifest` must carry store-page metadata for a public listing:
+   - `description` — **required**, a non-empty string describing your plugin.
+   - `icon` — **required**, a non-empty string: an `https://` URL or a `data:`
+     URI for the plugin icon.
+   - `screenshots` — **optional**, an array of non-empty `https://` URL strings.
 4. Validate locally (same check CI runs):
    ```bash
    node scripts/validate.mjs catalog/yourname/my-tool/plugin.json
@@ -57,6 +62,8 @@ this repo** — you sign every submission with it.
 - `namespaced_slug` must equal `@<publisher>/<slug>`.
 - `channel` must be `stable` or `beta`.
 - `license` must be non-empty.
+- `manifest.description` and `manifest.icon` must be present and non-empty; if
+  `manifest.screenshots` is present it must be an array of non-empty strings.
 - Your publisher must be registered and `publisher_key_id` must match it.
 - The signature must verify against your registered public key over
   `slug\0version\0artifact_url`.

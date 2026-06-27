@@ -13,7 +13,11 @@ on:
 
 jobs:
   validate:
-    runs-on: aihummer            # org self-hosted runner (Node available)
+    # GitHub-HOSTED runner, deliberately NOT self-hosted: this repo is PUBLIC and
+    # accepts UNTRUSTED external PRs, so PR CI must never run contributor-supplied
+    # code on the org's own infrastructure. The validator is pure Node (no deps),
+    # ideal for a hosted runner; public repos get unlimited hosted minutes.
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -103,6 +103,18 @@ The publish job counter-signs each release with `REGISTRY_SIGNING_KEY`, injects
 the signature as `manifest.signature`, and uploads `catalog.json` via `mc`
 (MinIO client) or `aws s3`.
 
+## Moderation
+
+This is a public registry that accepts untrusted submissions. The policy is
+**AI-assist + mandatory human**: an AI reviewer posts a risk verdict, but a human
+maintainer always makes the final merge decision. See
+[`MODERATION.md`](MODERATION.md) for the full six-layer policy (auto-gates →
+maintainer-merge chokepoint → AI-assist review → CODEOWNERS + checklist → trust
+tiers → post-publish revoke + abuse reports).
+
+The AI review (`ai-review.yml`) is gated on the **`ANTHROPIC_API_KEY`** repo
+secret; absent ⇒ it skips and exits 0.
+
 ## Contributing
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md). Agents/maintainers: read
@@ -110,5 +122,9 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md). Agents/maintainers: read
 
 ## CI runner
 
-Both workflows use `runs-on: aihummer` (the org self-hosted runner). Node is
-available there; the validator has **no npm dependencies**.
+PR CI (`validate.yml`) and `ai-review.yml` run on **GitHub-hosted**
+`ubuntu-latest` — deliberately NOT the org self-hosted runner, since this repo is
+public and accepts untrusted PRs (untrusted code must never run on our infra;
+public repos get unlimited hosted minutes). `publish.yml` also runs on
+`ubuntu-latest` (it is trusted — push to `main` only — and installs `mc` in a
+step). The validator has **no npm dependencies**.

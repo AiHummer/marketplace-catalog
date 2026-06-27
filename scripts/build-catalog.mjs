@@ -55,6 +55,34 @@ function signedPayload(slug, version, sourceRef) {
   return Buffer.from(`${slug}\x00${version}\x00${sourceRef}`, "utf8");
 }
 
+// Load the revoke/yank list: revoked.json is an array of
+// { namespaced_slug, version, reason, date }. Any submission whose
+// namespaced_slug + version matches a revoked entry is EXCLUDED from catalog.json
+// (post-publish takedown — see MODERATION.md, layer 6). Returns a Set of
+// "namespaced_slug@version" keys.
+function loadRevoked() {
+  const file = join(ROOT, "revoked.json");
+  if (!existsSync(file)) return new Set();
+  let arr;
+  try {
+    arr = JSON.parse(readFileSync(file, "utf8"));
+  } catch (e) {
+    console.error(`revoked.json is invalid JSON: ${e.message}`);
+    process.exit(2);
+  }
+  if (!Array.isArray(arr)) {
+    console.error("revoked.json must be a JSON array");
+    process.exit(2);
+  }
+  const set = new Set();
+  for (const r of arr) {
+    if (r && r.namespaced_slug && r.version) {
+      set.add(`${r.namespaced_slug}@${r.version}`);
+    }
+  }
+  return set;
+}
+
 function walk(dir, match, acc) {
   if (!existsSync(dir)) return acc;
   for (const name of readdirSync(dir)) {
@@ -66,10 +94,21 @@ function walk(dir, match, acc) {
 }
 
 const submissions = walk(join(ROOT, "catalog"), (p) => p.endsWith("/plugin.json") || p.endsWith("\\plugin.json"), []);
+const revoked = loadRevoked();
 const modules = [];
+let excluded = 0;
 
 for (const file of submissions) {
   const s = JSON.parse(readFileSync(file, "utf8"));
+
+  // skip any submission on the revoke/yank list (matched by namespaced_slug@version).
+  const revokeKey = `${s.namespaced_slug || `@${s.publisher}/${s.slug}`}@${s.version}`;
+  if (revoked.has(revokeKey)) {
+    console.log(`excluded (revoked): ${revokeKey}`);
+    excluded++;
+    continue;
+  }
+
   const manifest = { ...(s.manifest || {}) };
 
   // counter-sign slug\0version\0artifact_url with the registry key.
@@ -101,4 +140,4 @@ for (const file of submissions) {
 
 modules.sort((a, b) => a.slug.localeCompare(b.slug));
 writeFileSync(OUT, JSON.stringify({ modules }, null, 2) + "\n");
-console.log(`wrote ${modules.length} module(s) to ${OUT}`);
+console.log(`wrote ${modules.length} module(s) to ${OUT} (excluded ${excluded} revoked)`);

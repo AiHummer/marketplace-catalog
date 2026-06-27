@@ -1,0 +1,26 @@
+# CODEOWNERS — moderation chokepoint for the public plugin registry.
+#
+# Every submission (catalog/**) and publisher registration (publishers/**)
+# requires a review from the AiHummer maintainers before it can merge. This is
+# the "AI-assist + MANDATORY HUMAN" policy: the AI reviewer (ai-review.yml) posts
+# a verdict, but a human maintainer ALWAYS makes the final merge decision.
+#
+# NOTE: external plugin authors do NOT have write access to this repo, so they
+# cannot self-merge their own PRs regardless of CODEOWNERS — branch protection +
+# the maintainers' exclusive merge right is the real chokepoint. CODEOWNERS makes
+# the required-review explicit and routes the request to the right team.
+#
+# To enforce this, enable branch protection on `main`:
+#   - Require a pull request before merging
+#   - Require review from Code Owners
+#   - (recommended) Require the `validate` status check to pass
+
+# Submissions and publisher identities — maintainer review required.
+/catalog/      @AiHummer/maintainers
+/publishers/   @AiHummer/maintainers
+
+# The CI, scripts, moderation policy and revoke list — maintainer review required.
+/.github/      @AiHummer/maintainers
+/scripts/      @AiHummer/maintainers
+/revoked.json  @AiHummer/maintainers
+/MODERATION.md @AiHummer/maintainers

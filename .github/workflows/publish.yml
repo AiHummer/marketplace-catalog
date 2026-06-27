@@ -18,7 +18,11 @@ permissions:
 
 jobs:
   publish:
-    runs-on: aihummer            # org self-hosted runner
+    # GitHub-HOSTED runner. This job is TRUSTED — it only runs on push to main
+    # (post-merge, maintainer-gated code), never on untrusted PR head — so a
+    # hosted runner with secrets is safe. The MinIO client `mc` is installed in a
+    # step below.
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -53,7 +57,22 @@ jobs:
         if: steps.gate.outputs.enabled == 'true'
         env:
           REGISTRY_SIGNING_KEY: ${{ secrets.REGISTRY_SIGNING_KEY }}
-        run: node scripts/build-catalog.mjs
+        run: |
+          set -euo pipefail
+          # build-catalog.mjs prints how many entries it counter-signed and how
+          # many it EXCLUDED per revoked.json (the yank list).
+          OUTPUT=$(node scripts/build-catalog.mjs)
+          echo "$OUTPUT"
+          # surface the revoke exclusion count as a job notice.
+          echo "$OUTPUT" | grep -E 'excluded [0-9]+ revoked' | sed 's/^/::notice::/' || true
+
+      - name: Install MinIO client (mc)
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc
+          chmod +x /usr/local/bin/mc
+          mc --version
 
       - name: Upload catalog.json to CDN
         if: steps.gate.outputs.enabled == 'true'
@@ -64,7 +83,7 @@ jobs:
           CDN_BUCKET: ${{ secrets.CDN_BUCKET }}
         run: |
           set -euo pipefail
-          # Prefer the MinIO client `mc`; fall back to `aws s3`.
+          # Prefer the MinIO client `mc` (installed above); fall back to `aws s3`.
           if command -v mc >/dev/null 2>&1; then
             mc alias set aihcdn "$CDN_ENDPOINT" "$CDN_ACCESS_KEY" "$CDN_SECRET_KEY"
             mc cp catalog.json "aihcdn/${CDN_BUCKET}/catalog.json"

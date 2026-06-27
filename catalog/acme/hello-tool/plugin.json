@@ -16,10 +16,14 @@
     "publisher_key_id": "bd68f2deedad25b1",
     "scope": "shared",
     "contract": "1",
-    "description": "A friendly demo tool that says hello via the Acme greetings API.",
+    "description": "A friendly demo tool that says hello via the Acme greetings API (test PR).",
     "icon": "https://acme.example.com/plugins/hello-tool/icon.png",
-    "screenshots": ["https://acme.example.com/plugins/hello-tool/screenshot-1.png"],
-    "capabilities": ["hello.say"],
+    "screenshots": [
+      "https://acme.example.com/plugins/hello-tool/screenshot-1.png"
+    ],
+    "capabilities": [
+      "hello.say"
+    ],
     "config": [
       {
         "key": "api_token",
@@ -29,7 +33,9 @@
     ],
     "openapi": {
       "spec_url": "https://acme.example.com/plugins/hello-tool/openapi.json",
-      "allowed_hosts": ["api.acme.example.com"]
+      "allowed_hosts": [
+        "api.acme.example.com"
+      ]
     },
     "host_native": {},
     "mcp": {}

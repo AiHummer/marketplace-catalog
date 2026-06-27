@@ -1,23 +1,21 @@
+<div align="center">
+
 # AiHummer marketplace-catalog
 
-The **public plugin registry** for [AiHummer](https://aihummer.ru) — the
-producer side of the public marketplace flow (P3 in
-[`MARKETPLACE-PUBLISHING-DESIGN.md`](https://github.com/AiHummer/AiHummer/blob/main/docs/MARKETPLACE-PUBLISHING-DESIGN.md)).
+**The public community plugin registry for [AiHummer](https://aihummer.ru)** — third-party authors register a publisher identity and submit plugins by PR; CI validates the submission (shape + ed25519 signature + a security scan), an AI reviewer assists, and a human maintainer makes the final merge call. On merge the registry **counter-signs** the release with the pinned registry key and publishes a signed **`community-catalog.json`** to the CDN — kept separate from the curated first-party `catalog.json`. Instances opt in by adding this catalog as an extra source (Plugins → Sources); trust is the pinned registry key, no per-operator step.
 
-A third-party plugin author registers a **publisher** identity, then opens a PR
-adding their **submission**. CI validates the submission (shape, signature,
-security scan). On merge, AiHummer **counter-signs** the release with the pinned
-registry key and publishes a **`community-catalog.json`** to the CDN — the
-community catalog, kept separate from the curated first-party `catalog.json`. An
-AiHummer instance opts in by adding this catalog as an extra source (Plugins →
-Sources); entries are trusted via the pinned registry key — no per-operator trust
-step needed.
+![registry](https://img.shields.io/badge/registry-public-F0632E?style=flat-square&labelColor=100B09)
+![signing](https://img.shields.io/badge/signing-ed25519-00ADD8?style=flat-square&labelColor=100B09)
+![moderation](https://img.shields.io/badge/moderation-AI--assist%20%2B%20human-E0A53A?style=flat-square&labelColor=100B09)
+![CI](https://img.shields.io/badge/CI-GitHub--hosted-7C6F63?style=flat-square&labelColor=100B09)
 
-> **This repo will be PUBLIC at launch.** It is private for now while the flow is
-> being wired. Nothing here is a secret: there are no private keys in the repo
-> (the registry private key lives only in the `REGISTRY_SIGNING_KEY` repo secret;
-> publisher private keys stay with their authors). Flip the repo to public when
-> the public marketplace launches.
+</div>
+
+> **No secrets live in this repo.** The registry private key exists only as the
+> `REGISTRY_SIGNING_KEY` repo secret; publisher private keys stay with their
+> authors. PR CI runs on **GitHub-hosted** runners (never our infra), so an
+> untrusted submission can't reach internal systems. See **Moderation** + **CI
+> runner** below.
 
 ## Repository layout
 
@@ -167,3 +165,10 @@ public and accepts untrusted PRs (untrusted code must never run on our infra;
 public repos get unlimited hosted minutes). `publish.yml` also runs on
 `ubuntu-latest` (it is trusted — push to `main` only — and installs `mc` in a
 step). The validator has **no npm dependencies**.
+
+
+---
+
+<div align="center">
+<sub>© AiHummer · part of the <a href="https://docs.aihummer.ru">AiHummer</a> plugin marketplace</sub>
+</div>

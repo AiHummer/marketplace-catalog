@@ -14,7 +14,8 @@
 // the PR, plus a human summary.
 
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
-import { join, dirname, relative, sep } from "node:path";
+import { join, relative, sep } from "node:path";
+import { pathToFileURL } from "node:url";
 import { createPublicKey, verify as edVerify, createHash } from "node:crypto";
 
 const ROOT = process.cwd();
@@ -22,6 +23,12 @@ const CHANNELS = new Set(["stable", "beta"]);
 // Mirrors core's ValidPublisher (cmd/aihummer/plugin.go / internal/marketplace):
 // the publisher namespace must match this exact pattern.
 const VALID_PUBLISHER = /^[a-z0-9][a-z0-9-]{1,38}$/;
+// Mirrors core's slugRE (internal/marketplace/publish.go): a slug is a single
+// safe path segment. Same shape as the publisher rule but a 1-char slug is OK.
+// The producer (`publish --public`) enforces this, so the registry enforces the
+// identical rule to stay in lock-step (a hand-crafted PR cannot introduce a slug
+// the SDK would never emit).
+const VALID_SLUG = /^[a-z0-9][a-z0-9-]{0,38}$/;
 
 let errorCount = 0;
 let fileCount = 0;
@@ -235,6 +242,11 @@ function validateSubmissionFile(file) {
     err(file, `publisher "${s.publisher}" invalid (must match ^[a-z0-9][a-z0-9-]{1,38}$)`);
   }
 
+  // slug must match core's slugRE (lock-step with the SDK producer).
+  if (!VALID_SLUG.test(s.slug)) {
+    err(file, `slug "${s.slug}" invalid (must match ^[a-z0-9][a-z0-9-]{0,38}$)`);
+  }
+
   // namespaced_slug == @publisher/slug
   const expectedNs = `@${s.publisher}/${s.slug}`;
   if (s.namespaced_slug !== expectedNs) {
@@ -361,4 +373,12 @@ function main() {
   if (errorCount > 0) process.exit(1);
 }
 
-main();
+// Pure, side-effect-free helpers are exported for the self-tests
+// (scripts/validate.test.mjs). Importing this module does NOT run the CLI.
+export { keyID, signedPayload, verifySignature, scanManifest, VALID_PUBLISHER, VALID_SLUG, CHANNELS };
+
+// Run the CLI only when executed directly (`node scripts/validate.mjs`), not when
+// imported by the test harness.
+const invokedDirectly =
+  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (invokedDirectly) main();

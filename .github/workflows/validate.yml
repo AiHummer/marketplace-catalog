@@ -9,6 +9,7 @@ on:
       - "catalog/**"
       - "publishers/**"
       - "scripts/validate.mjs"
+      - "scripts/validate.test.mjs"
       - ".github/workflows/validate.yml"
 
 jobs:
@@ -26,6 +27,12 @@ jobs:
 
       - name: Node version
         run: node --version
+
+      # Self-tests for the validator's security-critical helpers (signature
+      # verification, manifest security scan, identity rules). Zero deps —
+      # built-in node:test runner.
+      - name: Validator self-tests
+        run: node --test scripts/validate.test.mjs
 
       - name: Determine changed catalog/publisher files
         id: changed

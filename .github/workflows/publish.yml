@@ -11,7 +11,6 @@ on:
       - "catalog/**"
       - "publishers/**"
       - "scripts/build-catalog.mjs"
-      - ".github/workflows/publish.yml"
 
 permissions:
   contents: read
@@ -83,16 +82,23 @@ jobs:
           CDN_BUCKET: ${{ secrets.CDN_BUCKET }}
         run: |
           set -euo pipefail
+          # IMPORTANT: this registry publishes the COMMUNITY catalog under its OWN
+          # object key — NOT the official `catalog.json` (which carries the curated
+          # first-party modules from core's seed and must never be clobbered from
+          # here). Instances opt into community plugins by adding this URL as an
+          # extra catalog source (B2 multi-source). Migrating the first-party
+          # modules into this repo to unify them is a separate future step.
+          KEY="community-catalog.json"
           # Prefer the MinIO client `mc` (installed above); fall back to `aws s3`.
           if command -v mc >/dev/null 2>&1; then
             mc alias set aihcdn "$CDN_ENDPOINT" "$CDN_ACCESS_KEY" "$CDN_SECRET_KEY"
-            mc cp catalog.json "aihcdn/${CDN_BUCKET}/catalog.json"
-            echo "Uploaded catalog.json via mc to ${CDN_BUCKET}/catalog.json"
+            mc cp catalog.json "aihcdn/${CDN_BUCKET}/${KEY}"
+            echo "Uploaded community catalog via mc to ${CDN_BUCKET}/${KEY}"
           elif command -v aws >/dev/null 2>&1; then
             AWS_ACCESS_KEY_ID="$CDN_ACCESS_KEY" \
             AWS_SECRET_ACCESS_KEY="$CDN_SECRET_KEY" \
-            aws --endpoint-url "$CDN_ENDPOINT" s3 cp catalog.json "s3://${CDN_BUCKET}/catalog.json"
-            echo "Uploaded catalog.json via aws s3 to ${CDN_BUCKET}/catalog.json"
+            aws --endpoint-url "$CDN_ENDPOINT" s3 cp catalog.json "s3://${CDN_BUCKET}/${KEY}"
+            echo "Uploaded community catalog via aws s3 to ${CDN_BUCKET}/${KEY}"
           else
             echo "::error::neither 'mc' nor 'aws' is available on the runner — install one to publish"
             exit 1

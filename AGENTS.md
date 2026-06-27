@@ -9,8 +9,12 @@
 The **public plugin registry** for AiHummer — the producer side of the public
 marketplace flow (P3, `AiHummer/docs/MARKETPLACE-PUBLISHING-DESIGN.md`). Third
 parties register a publisher and open PRs adding signed plugin submissions; CI
-validates them; on merge the registry counter-signs and publishes the official
-`catalog.json` to the CDN. It is **NOT** the core gateway (`AiHummer/AiHummer`,
+validates them; on merge the registry counter-signs and publishes a separate
+**`community-catalog.json`** to the CDN — the COMMUNITY catalog, which instances
+opt into by adding its URL as an extra catalog source (B2 multi-source). It
+deliberately does **NOT** overwrite the curated first-party `catalog.json` (the
+built-in modules from core's seed); unifying them by migrating the first-party
+modules into this repo is a future step. It is **NOT** the core gateway (`AiHummer/AiHummer`,
 which owns trust/signing/sync code) and **NOT** where plugin source or artifacts
 live (authors host their own `.tar.gz`). This repo holds only metadata +
 submissions + the CI that gates them.

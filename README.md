@@ -7,9 +7,11 @@ producer side of the public marketplace flow (P3 in
 A third-party plugin author registers a **publisher** identity, then opens a PR
 adding their **submission**. CI validates the submission (shape, signature,
 security scan). On merge, AiHummer **counter-signs** the release with the pinned
-registry key and publishes the official `catalog.json` to the CDN. Every
-AiHummer instance syncs that catalog and trusts entries via the pinned key — no
-per-operator trust step needed.
+registry key and publishes a **`community-catalog.json`** to the CDN — the
+community catalog, kept separate from the curated first-party `catalog.json`. An
+AiHummer instance opts in by adding this catalog as an extra source (Plugins →
+Sources); entries are trusted via the pinned registry key — no per-operator trust
+step needed.
 
 > **This repo will be PUBLIC at launch.** It is private for now while the flow is
 > being wired. Nothing here is a secret: there are no private keys in the repo

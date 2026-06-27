@@ -31,7 +31,7 @@ submissions + the CI that gates them.
 - `MODERATION.md` — the six-layer moderation policy (AI-assist + mandatory human).
 - `.github/workflows/validate.yml` — runs the validator on PRs (`runs-on: ubuntu-latest` — hosted; untrusted PRs must not touch self-hosted infra).
 - `.github/workflows/ai-review.yml` — AI review on `pull_request_target` (hosted; calls any OpenAI-compatible endpoint, gated on `AI_REVIEW_BASE_URL` + `AI_REVIEW_API_KEY`; never executes PR-head code).
-- `.github/workflows/publish.yml` — counter-signs + uploads `catalog.json` on push to main (`ubuntu-latest`, trusted; secret-gated).
+- `.github/workflows/publish.yml` — counter-signs + uploads `community-catalog.json` on push to main (`ubuntu-latest`, trusted; secret-gated).
 
 ## 3. Change-impact map ← read before editing
 | If you change… | You must also… | Blast radius |
@@ -58,12 +58,12 @@ No package manager, no dependencies — pure Node ≥ 18 (`node:crypto`). CI run
 untrusted PRs).
 
 ## 5. Release process
-There is no tagged release. The "release" is the published `catalog.json`:
+There is no tagged release. The "release" is the published `community-catalog.json`:
 - PR → `validate.yml` (hosted) gates it; `ai-review.yml` posts an advisory verdict;
   a maintainer reviews per `CODEOWNERS` + the PR checklist and merges (mandatory
   human — see `MODERATION.md`).
 - Merge to main → `publish.yml` counter-signs with `REGISTRY_SIGNING_KEY`,
-  excludes `revoked.json` entries, installs `mc`, and uploads `catalog.json` to
+  excludes `revoked.json` entries, installs `mc`, and uploads `community-catalog.json` to
   the CDN.
 - `publish.yml` is **secret-gated**: missing secrets ⇒ prints a skip notice,
   exits 0. Required secrets: `REGISTRY_SIGNING_KEY`, `CDN_ENDPOINT`,

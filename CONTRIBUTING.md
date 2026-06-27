@@ -75,7 +75,7 @@ this repo** — you sign every submission with it.
 
 A maintainer (human/AI) reviews and merges. On merge, the publish job
 **counter-signs** your release with the AiHummer registry key and uploads the
-official `catalog.json` to the CDN. Every AiHummer instance then sees your plugin
+community `community-catalog.json` to the CDN. Every AiHummer instance then sees your plugin
 and trusts it via the pinned registry key.
 
 ## Updating a plugin

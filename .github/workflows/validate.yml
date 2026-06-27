@@ -1,0 +1,51 @@
+name: validate
+
+# Validate every plugin submission and publisher registration changed in a PR.
+# Self-contained: the validator (scripts/validate.mjs) has zero deps and does NOT
+# reference the private core repo, so contributors can run it locally identically.
+on:
+  pull_request:
+    paths:
+      - "catalog/**"
+      - "publishers/**"
+      - "scripts/validate.mjs"
+      - ".github/workflows/validate.yml"
+
+jobs:
+  validate:
+    runs-on: aihummer            # org self-hosted runner (Node available)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # need the base ref to diff changed files
+
+      - name: Node version
+        run: node --version
+
+      - name: Determine changed catalog/publisher files
+        id: changed
+        run: |
+          set -euo pipefail
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          # Added/Copied/Modified/Renamed files under catalog/ or publishers/.
+          FILES=$(git diff --name-only --diff-filter=ACMR "$BASE" "$HEAD" -- catalog publishers || true)
+          echo "Changed files:"
+          echo "$FILES"
+          # newline -> space, keep only json submission/publisher files
+          SELECTED=$(echo "$FILES" | grep -E '^(catalog/.+/plugin\.json|publishers/[^/]+\.json)$' || true)
+          # join into a single space-separated line for the validator args
+          ONELINE=$(echo "$SELECTED" | tr '\n' ' ' | sed 's/  */ /g' | sed 's/^ //;s/ $//')
+          echo "selected=$ONELINE" >> "$GITHUB_OUTPUT"
+
+      - name: Validate changed submissions
+        run: |
+          set -euo pipefail
+          SEL="${{ steps.changed.outputs.selected }}"
+          if [ -z "$SEL" ]; then
+            echo "No catalog/publisher files changed — nothing to validate."
+            exit 0
+          fi
+          echo "Validating: $SEL"
+          node scripts/validate.mjs $SEL

@@ -1,0 +1,80 @@
+name: publish
+
+# On merge to main: counter-sign every accepted submission with the AiHummer
+# registry private key and publish the assembled catalog.json to the CDN.
+# Gated on secrets — if the operator has not wired them yet, the job prints a
+# clear notice and exits 0 (the repo is usable before secrets exist).
+on:
+  push:
+    branches: [main]
+    paths:
+      - "catalog/**"
+      - "publishers/**"
+      - "scripts/build-catalog.mjs"
+      - ".github/workflows/publish.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: aihummer            # org self-hosted runner
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Node version
+        run: node --version
+
+      - name: Check secrets are wired
+        id: gate
+        env:
+          REGISTRY_SIGNING_KEY: ${{ secrets.REGISTRY_SIGNING_KEY }}
+          CDN_ENDPOINT: ${{ secrets.CDN_ENDPOINT }}
+          CDN_ACCESS_KEY: ${{ secrets.CDN_ACCESS_KEY }}
+          CDN_SECRET_KEY: ${{ secrets.CDN_SECRET_KEY }}
+          CDN_BUCKET: ${{ secrets.CDN_BUCKET }}
+        run: |
+          set -euo pipefail
+          MISSING=""
+          [ -z "${REGISTRY_SIGNING_KEY:-}" ] && MISSING="$MISSING REGISTRY_SIGNING_KEY"
+          [ -z "${CDN_ENDPOINT:-}" ]        && MISSING="$MISSING CDN_ENDPOINT"
+          [ -z "${CDN_ACCESS_KEY:-}" ]      && MISSING="$MISSING CDN_ACCESS_KEY"
+          [ -z "${CDN_SECRET_KEY:-}" ]      && MISSING="$MISSING CDN_SECRET_KEY"
+          [ -z "${CDN_BUCKET:-}" ]          && MISSING="$MISSING CDN_BUCKET"
+          if [ -n "$MISSING" ]; then
+            echo "::notice::publish skipped: set repo secrets$MISSING to enable. See README.md (Publishing secrets)."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Assemble + counter-sign catalog.json
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          REGISTRY_SIGNING_KEY: ${{ secrets.REGISTRY_SIGNING_KEY }}
+        run: node scripts/build-catalog.mjs
+
+      - name: Upload catalog.json to CDN
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          CDN_ENDPOINT: ${{ secrets.CDN_ENDPOINT }}
+          CDN_ACCESS_KEY: ${{ secrets.CDN_ACCESS_KEY }}
+          CDN_SECRET_KEY: ${{ secrets.CDN_SECRET_KEY }}
+          CDN_BUCKET: ${{ secrets.CDN_BUCKET }}
+        run: |
+          set -euo pipefail
+          # Prefer the MinIO client `mc`; fall back to `aws s3`.
+          if command -v mc >/dev/null 2>&1; then
+            mc alias set aihcdn "$CDN_ENDPOINT" "$CDN_ACCESS_KEY" "$CDN_SECRET_KEY"
+            mc cp catalog.json "aihcdn/${CDN_BUCKET}/catalog.json"
+            echo "Uploaded catalog.json via mc to ${CDN_BUCKET}/catalog.json"
+          elif command -v aws >/dev/null 2>&1; then
+            AWS_ACCESS_KEY_ID="$CDN_ACCESS_KEY" \
+            AWS_SECRET_ACCESS_KEY="$CDN_SECRET_KEY" \
+            aws --endpoint-url "$CDN_ENDPOINT" s3 cp catalog.json "s3://${CDN_BUCKET}/catalog.json"
+            echo "Uploaded catalog.json via aws s3 to ${CDN_BUCKET}/catalog.json"
+          else
+            echo "::error::neither 'mc' nor 'aws' is available on the runner — install one to publish"
+            exit 1
+          fi

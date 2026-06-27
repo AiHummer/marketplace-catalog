@@ -1,7 +1,8 @@
 name: publish
 
 # On merge to main: counter-sign every accepted submission with the AiHummer
-# registry private key and publish the assembled catalog.json to the CDN.
+# registry private key and publish the assembled community catalog
+# (object key `community-catalog.json`) to the CDN.
 # Gated on secrets — if the operator has not wired them yet, the job prints a
 # clear notice and exits 0 (the repo is usable before secrets exist).
 on:
@@ -67,13 +68,22 @@ jobs:
 
       - name: Install MinIO client (mc)
         if: steps.gate.outputs.enabled == 'true'
+        env:
+          # Pinned + checksum-verified. This job holds the registry signing key +
+          # CDN creds, so it must never fetch a FLOATING `mc`. To bump: pick a new
+          # release and read its hash from
+          # dl.min.io/client/mc/release/linux-amd64/archive/mc.<RELEASE>.sha256sum
+          # then update BOTH MC_RELEASE and MC_SHA256 together.
+          MC_RELEASE: RELEASE.2025-08-13T08-35-41Z
+          MC_SHA256: 01f866e9c5f9b87c2b09116fa5d7c06695b106242d829a8bb32990c00312e891
         run: |
           set -euo pipefail
-          curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc
+          curl -fsSL "https://dl.min.io/client/mc/release/linux-amd64/archive/mc.${MC_RELEASE}" -o /usr/local/bin/mc
+          echo "${MC_SHA256}  /usr/local/bin/mc" | sha256sum -c -
           chmod +x /usr/local/bin/mc
           mc --version
 
-      - name: Upload catalog.json to CDN
+      - name: Upload community catalog to CDN
         if: steps.gate.outputs.enabled == 'true'
         env:
           CDN_ENDPOINT: ${{ secrets.CDN_ENDPOINT }}

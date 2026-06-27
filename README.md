@@ -27,7 +27,7 @@ catalog/<publisher>/<slug>/plugin.json   a plugin submission (one per version li
 scripts/validate.mjs                     self-contained PR validator (node:crypto, no deps)
 scripts/build-catalog.mjs                counter-signs + assembles catalog.json on merge
 .github/workflows/validate.yml           runs validate.mjs on every PR
-.github/workflows/publish.yml            counter-signs + uploads catalog.json on merge to main
+.github/workflows/publish.yml            counter-signs + uploads community-catalog.json on merge to main
 ```
 
 ## The submission contract
@@ -112,10 +112,10 @@ enable publishing, set these **repository secrets**:
 | `CDN_ENDPOINT` | S3/MinIO endpoint URL of the catalog CDN. |
 | `CDN_ACCESS_KEY` | CDN access key. |
 | `CDN_SECRET_KEY` | CDN secret key. |
-| `CDN_BUCKET` | Bucket the `catalog.json` is written to. |
+| `CDN_BUCKET` | Bucket the `community-catalog.json` is written to. |
 
 The publish job counter-signs each release with `REGISTRY_SIGNING_KEY`, injects
-the signature as `manifest.signature`, and uploads `catalog.json` via `mc`
+the signature as `manifest.signature`, and uploads `community-catalog.json` via `mc`
 (MinIO client) or `aws s3`.
 
 ## AI review configuration (free / local — no paid model API)

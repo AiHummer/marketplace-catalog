@@ -19,6 +19,9 @@ import { createPublicKey, verify as edVerify, createHash } from "node:crypto";
 
 const ROOT = process.cwd();
 const CHANNELS = new Set(["stable", "beta"]);
+// Mirrors core's ValidPublisher (cmd/aihummer/plugin.go / internal/marketplace):
+// the publisher namespace must match this exact pattern.
+const VALID_PUBLISHER = /^[a-z0-9][a-z0-9-]{1,38}$/;
 
 let errorCount = 0;
 let fileCount = 0;
@@ -185,6 +188,9 @@ function validatePublisherFile(file) {
   if (base !== p.publisher) {
     err(file, `file name "${base}.json" must match publisher "${p.publisher}"`);
   }
+  if (!VALID_PUBLISHER.test(p.publisher)) {
+    err(file, `publisher "${p.publisher}" invalid (must match ^[a-z0-9][a-z0-9-]{1,38}$)`);
+  }
   // public_key must be a valid 32-byte ed25519 key and key_id must match.
   const derivedId = keyID(p.public_key);
   if (!derivedId) {
@@ -223,6 +229,11 @@ function validateSubmissionFile(file) {
     bad = true;
   }
   if (bad) return;
+
+  // publisher namespace must match core's ValidPublisher.
+  if (!VALID_PUBLISHER.test(s.publisher)) {
+    err(file, `publisher "${s.publisher}" invalid (must match ^[a-z0-9][a-z0-9-]{1,38}$)`);
+  }
 
   // namespaced_slug == @publisher/slug
   const expectedNs = `@${s.publisher}/${s.slug}`;

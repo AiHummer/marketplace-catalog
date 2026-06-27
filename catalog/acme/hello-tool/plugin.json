@@ -2,21 +2,23 @@
   "publisher": "acme",
   "slug": "hello-tool",
   "namespaced_slug": "@acme/hello-tool",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "channel": "stable",
-  "artifact_url": "https://acme.example.com/plugins/hello-tool-1.0.0.tar.gz",
+  "artifact_url": "https://acme.example.com/plugins/hello-tool-1.0.1.tar.gz",
   "license": "MIT",
   "publisher_key_id": "bd68f2deedad25b1",
-  "signature": "vQI4ZEZucKgegIWKJXjBC/NpvAsm9ZemoGKx7LD2Hb/iQGvcuXkAgRSLWLsTKlO74Rt2OhcH3dTMVX24vNlZCA==",
+  "signature": "FJ5h18RUEZl20n3n4gxRaSbIGcnQxE2S7ESTjIpw+pXriIsBfMZQy9z5l0lmWHIUiONefZMCz+RNFIzZ8VLkBw==",
   "manifest": {
-    "version": "1.0.0",
+    "version": "1.0.1",
     "kind": "openapi",
     "publisher": "acme",
     "visibility": "public",
     "publisher_key_id": "bd68f2deedad25b1",
     "scope": "shared",
     "contract": "1",
-    "capabilities": ["hello.say"],
+    "capabilities": [
+      "hello.say"
+    ],
     "config": [
       {
         "key": "api_token",
@@ -26,7 +28,9 @@
     ],
     "openapi": {
       "spec_url": "https://acme.example.com/plugins/hello-tool/openapi.json",
-      "allowed_hosts": ["api.acme.example.com"]
+      "allowed_hosts": [
+        "api.acme.example.com"
+      ]
     },
     "host_native": {},
     "mcp": {}

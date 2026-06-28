@@ -114,7 +114,12 @@ function verifySignature(payload, signatureB64, publicKeyB64) {
 // (sh/bash/zsh/dash/ksh/ash/fish, python[23], perl, ruby, node, php, pwsh,
 // powershell, iex). Closes the `|  sh` / `| python` bypasses of the old
 // `includes("| sh")` check.
-const pipeShellRe = /\|\s*(?:sudo\s+)?(?:[\w./-]*\/)?(sh|bash|zsh|dash|ksh|ash|fish|python[23]?|perl|ruby|node|php|pwsh|powershell|iex|invoke-expression)\b/;
+//
+// It also tolerates an `env` launcher in front of the interpreter
+// (`| env sh`, `| /usr/bin/env bash`, `| env -S python3`, `| env VAR=v sh`):
+// `env <shell>` (optionally path-prefixed, with flag/assignment args) is just
+// pipe-to-shell with a space before the interpreter, which the old regex missed.
+const pipeShellRe = /\|\s*(?:sudo\s+)?(?:(?:[\w./-]*\/)?env\s+(?:(?:-\S+|[\w.]+=\S+)\s+)*)?(?:[\w./-]*\/)?(sh|bash|zsh|dash|ksh|ash|fish|python[23]?|perl|ruby|node|php|pwsh|powershell|iex|invoke-expression)\b/;
 
 // inlineExecRe matches an interpreter invoked with an inline-code flag
 // (`python -c`, `bash -c`, `node -e`, `powershell -Command`) — the
@@ -143,14 +148,17 @@ function riskyShellExec(l) {
 }
 
 // credExactHints are short/ambiguous credential tokens matched on a whole-word
-// boundary (so "pat" flags a `pat` field but not `path`/`pattern`/`compatible`).
-const CRED_EXACT_HINTS = ["pat", "key", "token", "secret", "cred", "auth"];
+// boundary (so "pat" flags a `pat` field but not `path`/`pattern`/`compatible`,
+// and "passwd"/"passphrase" flag `db_passwd`/`vault_passphrase` but never
+// `path`/`pattern`).
+const CRED_EXACT_HINTS = ["pat", "key", "token", "secret", "cred", "auth", "passwd", "passphrase"];
 
 // credSubHints are unambiguous credential markers matched anywhere in the key.
 const CRED_SUB_HINTS = [
-  "token", "secret", "password", "passwd", "api_key", "apikey", "private_key",
-  "privatekey", "credential", "client_secret", "access_key", "secret_key",
-  "bearer", "auth_token", "refresh_token", "session_key", "signing_key",
+  "token", "secret", "password", "passwd", "passphrase", "api_key", "apikey",
+  "private_key", "privatekey", "credential", "client_secret", "access_key",
+  "secret_key", "bearer", "auth_token", "refresh_token", "session_key",
+  "signing_key",
 ];
 
 // looksLikeCredential reports whether a config key name suggests it holds a
@@ -190,16 +198,18 @@ function scanManifest(m) {
     add("warn", "host_native.exec_start", "fetches from the network at start — prefer a vendored binary");
   }
 
-  // 2. egress allow-lists: "*" lets the agent reach any host; a wildcard PREFIX
-  //    (`*.evil`, `*foo`) is similarly broad/forgeable and must be flagged too.
+  // 2. egress allow-lists: "*" lets the agent reach any host; ANY wildcard inside
+  //    an entry — prefix (`*.evil`, `*foo`), suffix (`evil*`), or embedded
+  //    (`e*il.com`) — is broad/forgeable (`evil*` matches `evil-exfil.com`) and
+  //    must be flagged too.
   const openapi = m.openapi || {};
   const allowed = Array.isArray(openapi.allowed_hosts) ? openapi.allowed_hosts : [];
   for (const h of allowed) {
     const t = String(h).trim();
     if (t === "*") {
       add("high", "openapi.allowed_hosts", "allows egress to ANY host (*) — scope to specific hosts");
-    } else if (t.startsWith("*")) {
-      add("high", "openapi.allowed_hosts", `wildcard-prefix host "${t}" allows a broad/ambiguous host set — pin exact hosts`);
+    } else if (t.includes("*")) {
+      add("high", "openapi.allowed_hosts", `wildcard host "${t}" allows a broad/ambiguous host set — pin exact hosts`);
     }
   }
 

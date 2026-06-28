@@ -16,9 +16,15 @@ org's self-hosted infra — untrusted PR code must not touch our machines). It
 enforces the submission contract and a security scan: required fields,
 `namespaced_slug == @publisher/slug`, channel ∈ {stable,beta}, non-empty license,
 publisher registered + key match, ed25519 signature over
-`slug\0version\0artifact_url`, and a manifest scan that **fails** on pipe-to-shell
-installers, wildcard (`*`) egress, and unflagged secret-looking config. A red
-check blocks merge.
+`slug\0version\0artifact_url`, and a manifest scan (a 1:1 mirror of core's
+hardened `ScanManifest`, so registry-accepted == instance-accepted) that
+**fails** on download-then-exec installers (any downloader — `curl`/`wget`/`fetch`/
+`aria2c`/`scp`/PowerShell cradles/… — piped or inline-exec'd into any shell or
+interpreter, tolerant of odd whitespace like `|  sh` / `|\tsh` / `| python`),
+pipe-to-shell in `exec_start` (a HARD fail, vs a plain network fetch which is a
+warn), wide-open **or wildcard-prefix** egress (`*`, `*.evil`), and unflagged
+secret-looking config (`token`/`secret`/`credential`/`pat`/`apikey`/… on a
+whole-word boundary). A red check blocks merge.
 
 ### 2. Maintainer-merge chokepoint
 External plugin authors have **no write access** to this repo, so they cannot

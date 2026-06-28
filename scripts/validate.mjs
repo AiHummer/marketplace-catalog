@@ -14,7 +14,8 @@
 // the PR, plus a human summary.
 
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
-import { join, dirname, relative, sep } from "node:path";
+import { join, relative, sep } from "node:path";
+import { pathToFileURL } from "node:url";
 import { createPublicKey, verify as edVerify, createHash } from "node:crypto";
 
 const ROOT = process.cwd();
@@ -22,6 +23,12 @@ const CHANNELS = new Set(["stable", "beta"]);
 // Mirrors core's ValidPublisher (cmd/aihummer/plugin.go / internal/marketplace):
 // the publisher namespace must match this exact pattern.
 const VALID_PUBLISHER = /^[a-z0-9][a-z0-9-]{1,38}$/;
+// Mirrors core's slugRE (internal/marketplace/publish.go): a slug is a single
+// safe path segment. Same shape as the publisher rule but a 1-char slug is OK.
+// The producer (`publish --public`) enforces this, so the registry enforces the
+// identical rule to stay in lock-step (a hand-crafted PR cannot introduce a slug
+// the SDK would never emit).
+const VALID_SLUG = /^[a-z0-9][a-z0-9-]{0,38}$/;
 
 let errorCount = 0;
 let fileCount = 0;
@@ -95,6 +102,76 @@ function verifySignature(payload, signatureB64, publicKeyB64) {
 
 // --- manifest security scan (standalone mirror of core ScanManifest) --------
 // Returns an array of { severity, field, message }. High findings fail the gate.
+//
+// This is a 1:1 port of `internal/marketplace/scan.go` (core's hardened
+// ScanManifest, PR #28). The rule set is COORDINATED with core so that
+// registry-accepted == instance-accepted: a submission that passes this gate
+// passes core's in-process scan, and vice-versa. When core's scan.go changes,
+// change this block to match (and the self-tests in validate.test.mjs).
+
+// pipeShellRe matches a pipe into a shell/interpreter, tolerant of odd spacing
+// (`|sh`, `|  sh`, `|\tsh`, `| sudo bash`, `| /bin/sh`) and many interpreters
+// (sh/bash/zsh/dash/ksh/ash/fish, python[23], perl, ruby, node, php, pwsh,
+// powershell, iex). Closes the `|  sh` / `| python` bypasses of the old
+// `includes("| sh")` check.
+//
+// It also tolerates an `env` launcher in front of the interpreter
+// (`| env sh`, `| /usr/bin/env bash`, `| env -S python3`, `| env VAR=v sh`):
+// `env <shell>` (optionally path-prefixed, with flag/assignment args) is just
+// pipe-to-shell with a space before the interpreter, which the old regex missed.
+const pipeShellRe = /\|\s*(?:sudo\s+)?(?:(?:[\w./-]*\/)?env\s+(?:(?:-\S+|[\w.]+=\S+)\s+)*)?(?:[\w./-]*\/)?(sh|bash|zsh|dash|ksh|ash|fish|python[23]?|perl|ruby|node|php|pwsh|powershell|iex|invoke-expression)\b/;
+
+// inlineExecRe matches an interpreter invoked with an inline-code flag
+// (`python -c`, `bash -c`, `node -e`, `powershell -Command`) — the
+// "download then exec inline" form that doesn't use a literal pipe.
+const inlineExecRe = /\b(sh|bash|zsh|dash|ksh|python[23]?|perl|ruby|node|php|pwsh|powershell)\b\s+-(c|e|command|enc|encodedcommand)\b/;
+
+// downloaders are network fetch commands. A pipe-to-shell (or inline-exec) from
+// ANY of these is the supply-chain footgun — not just curl/wget. Matched as
+// lowercased substrings; a few carry a trailing space to avoid false hits.
+const DOWNLOADERS = [
+  "curl", "wget", "fetch ", "aria2c", "lwp-download", "lwp-request",
+  "nc ", "ncat", "socat", "scp ", "sftp ", "ftp ", "tftp",
+  "invoke-webrequest", "invoke-restmethod", "iwr ", "irm ",
+  "downloadstring", "downloadfile", "start-bitstransfer",
+  "urllib", "requests.get", "requests.post", "http.client", "httpie", "wsgiref",
+];
+
+const containsAny = (s, subs) => subs.some((sub) => s.includes(sub));
+
+// riskyShellExec reports whether a command line downloads code and runs it via a
+// shell/interpreter — either piped (`fetch URL | python`) or inline
+// (`python -c "import urllib...; exec(...)"`).
+function riskyShellExec(l) {
+  if (pipeShellRe.test(l)) return true;
+  return containsAny(l, DOWNLOADERS) && inlineExecRe.test(l);
+}
+
+// credExactHints are short/ambiguous credential tokens matched on a whole-word
+// boundary (so "pat" flags a `pat` field but not `path`/`pattern`/`compatible`,
+// and "passwd"/"passphrase" flag `db_passwd`/`vault_passphrase` but never
+// `path`/`pattern`).
+const CRED_EXACT_HINTS = ["pat", "key", "token", "secret", "cred", "auth", "passwd", "passphrase"];
+
+// credSubHints are unambiguous credential markers matched anywhere in the key.
+const CRED_SUB_HINTS = [
+  "token", "secret", "password", "passwd", "passphrase", "api_key", "apikey",
+  "private_key", "privatekey", "credential", "client_secret", "access_key",
+  "secret_key", "bearer", "auth_token", "refresh_token", "session_key",
+  "signing_key",
+];
+
+// looksLikeCredential reports whether a config key name suggests it holds a
+// secret. Long markers match as substrings; short ambiguous ones (pat/key/auth)
+// only match as a standalone token to avoid false positives like "path".
+function looksLikeCredential(key) {
+  const k = String(key || "").toLowerCase();
+  if (containsAny(k, CRED_SUB_HINTS)) return true;
+  for (const tok of k.split(/[^a-z0-9]+/)) {
+    if (CRED_EXACT_HINTS.includes(tok)) return true;
+  }
+  return false;
+}
 
 function scanManifest(m) {
   const out = [];
@@ -102,39 +179,47 @@ function scanManifest(m) {
   m = m || {};
   const hostNative = m.host_native || {};
 
-  // 1. install/exec steps that pipe a download straight into a shell.
+  // 1. install steps that download code and run it through a shell/interpreter —
+  //    matched across downloaders + interpreters + odd whitespace + inline-exec.
   const install = Array.isArray(hostNative.install) ? hostNative.install : [];
   install.forEach((step, i) => {
-    const l = String(step).toLowerCase();
-    const pipesToShell =
-      ((l.includes("curl") || l.includes("wget")) &&
-        (l.includes("| sh") || l.includes("|sh") || l.includes("| bash") || l.includes("|bash")));
-    if (pipesToShell) {
-      add("high", `host_native.install[${i}]`, "pipes a download into a shell (review the source)");
+    if (riskyShellExec(String(step).toLowerCase())) {
+      add("high", `host_native.install[${i}]`, "downloads code and pipes/execs it through a shell (review the source)");
     }
   });
+
+  // 1b. exec_start that pipes a download into a shell is a HARD finding (high):
+  //     a process that fetches+runs code at every start defeats the
+  //     signed-artifact model. A plain network fetch (no shell) stays a warn.
   const execStart = String(hostNative.exec_start || "").toLowerCase();
-  if (execStart.includes("curl ") || execStart.includes("wget ")) {
+  if (riskyShellExec(execStart)) {
+    add("high", "host_native.exec_start", "pipes/execs a network download through a shell at start (use a vendored, signed binary)");
+  } else if (execStart.includes("curl ") || execStart.includes("wget ") || containsAny(execStart, DOWNLOADERS)) {
     add("warn", "host_native.exec_start", "fetches from the network at start — prefer a vendored binary");
   }
 
-  // 2. wildcard egress on an openapi tool.
+  // 2. egress allow-lists: "*" lets the agent reach any host; ANY wildcard inside
+  //    an entry — prefix (`*.evil`, `*foo`), suffix (`evil*`), or embedded
+  //    (`e*il.com`) — is broad/forgeable (`evil*` matches `evil-exfil.com`) and
+  //    must be flagged too.
   const openapi = m.openapi || {};
   const allowed = Array.isArray(openapi.allowed_hosts) ? openapi.allowed_hosts : [];
   for (const h of allowed) {
-    if (String(h).trim() === "*") {
+    const t = String(h).trim();
+    if (t === "*") {
       add("high", "openapi.allowed_hosts", "allows egress to ANY host (*) — scope to specific hosts");
+    } else if (t.includes("*")) {
+      add("high", "openapi.allowed_hosts", `wildcard host "${t}" allows a broad/ambiguous host set — pin exact hosts`);
     }
   }
 
   // 3. secret-looking config fields not marked secret:true.
   const config = Array.isArray(m.config) ? m.config : [];
-  const hints = ["token", "secret", "password", "passwd", "api_key", "apikey", "private_key"];
   config.forEach((c, i) => {
     if (c && c.secret) return;
-    const k = String((c && c.key) || "").toLowerCase();
-    if (hints.some((h) => k.includes(h))) {
-      add("high", `config[${i}].key=${(c && c.key) || ""}`, "looks like a credential but is not marked secret:true");
+    const key = (c && c.key) || "";
+    if (looksLikeCredential(key)) {
+      add("high", `config[${i}].key=${key}`, "looks like a credential but is not marked secret:true");
     }
   });
 
@@ -233,6 +318,11 @@ function validateSubmissionFile(file) {
   // publisher namespace must match core's ValidPublisher.
   if (!VALID_PUBLISHER.test(s.publisher)) {
     err(file, `publisher "${s.publisher}" invalid (must match ^[a-z0-9][a-z0-9-]{1,38}$)`);
+  }
+
+  // slug must match core's slugRE (lock-step with the SDK producer).
+  if (!VALID_SLUG.test(s.slug)) {
+    err(file, `slug "${s.slug}" invalid (must match ^[a-z0-9][a-z0-9-]{0,38}$)`);
   }
 
   // namespaced_slug == @publisher/slug
@@ -361,4 +451,12 @@ function main() {
   if (errorCount > 0) process.exit(1);
 }
 
-main();
+// Pure, side-effect-free helpers are exported for the self-tests
+// (scripts/validate.test.mjs). Importing this module does NOT run the CLI.
+export { keyID, signedPayload, verifySignature, scanManifest, VALID_PUBLISHER, VALID_SLUG, CHANNELS };
+
+// Run the CLI only when executed directly (`node scripts/validate.mjs`), not when
+// imported by the test harness.
+const invokedDirectly =
+  process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (invokedDirectly) main();

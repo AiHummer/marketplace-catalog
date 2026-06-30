@@ -12,8 +12,18 @@ on:
       - "scripts/validate.test.mjs"
       - ".github/workflows/validate.yml"
 
+# Untrusted PR CI: no secrets are needed or used here. Least-privilege token.
+permissions:
+  contents: read
+
+# One validation run per PR; a new push supersedes the in-flight run.
+concurrency:
+  group: validate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate:
+    timeout-minutes: 10
     # GitHub-HOSTED runner, deliberately NOT self-hosted: this repo is PUBLIC and
     # accepts UNTRUSTED external PRs, so PR CI must never run contributor-supplied
     # code on the org's own infrastructure. The validator is pure Node (no deps),
@@ -21,12 +31,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0          # need the base ref to diff changed files
-
-      - name: Node version
-        run: node --version
 
       # Self-tests for the validator's security-critical helpers (signature
       # verification, manifest security scan, identity rules). Zero deps —

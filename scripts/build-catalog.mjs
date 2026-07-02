@@ -16,7 +16,7 @@
 
 import { readFileSync, readdirSync, statSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createPrivateKey, sign as edSign, createHash, createPublicKey } from "node:crypto";
+import { createPrivateKey, sign as edSign, verify as edVerify, createHash, createPublicKey } from "node:crypto";
 
 const ROOT = process.cwd();
 const OUT = process.env.OUT || join(ROOT, "catalog.json");
@@ -47,12 +47,49 @@ const priv = loadPrivateKey(keyB64);
 const pubRaw = Buffer.from(createPublicKey(priv).export({ format: "jwk" }).x, "base64url");
 const registryKeyId = keyIDOfPublic(pubRaw);
 console.log(`registry counter-sign key id: ${registryKeyId}`);
-if (registryKeyId !== "7723a1e2b6ec925b") {
-  console.error(`WARNING: registry key id ${registryKeyId} != pinned 7723a1e2b6ec925b — instances will reject this catalog`);
+if (registryKeyId !== "7723a1e2b6ec925b" && process.env.ALLOW_UNPINNED_REGISTRY_KEY !== "1") {
+  console.error(`FATAL: registry key id ${registryKeyId} != pinned 7723a1e2b6ec925b — every instance would REJECT this catalog. Set ALLOW_UNPINNED_REGISTRY_KEY=1 only for a coordinated key rotation.`);
+  process.exit(2);
 }
 
-function signedPayload(slug, version, sourceRef) {
-  return Buffer.from(`${slug}\x00${version}\x00${sourceRef}`, "utf8");
+// signedPayload mirrors core's marketplace.SignedPayloadWithDigest: when a hex
+// artifact_sha256 is present it binds it into the signed bytes so the registry
+// counter-signature matches exactly what the gateway Install gate verifies
+// (otherwise a community plugin declaring artifact_sha256 would fail to install).
+// An empty digest reproduces the plain URL release-identity the publisher signs.
+function signedPayload(slug, version, sourceRef, sha256Hex) {
+  const d = (sha256Hex || "").trim().toLowerCase();
+  const base = `${slug}\x00${version}\x00${sourceRef}`;
+  return Buffer.from(d ? `${base}\x00sha256:${d}` : base, "utf8");
+}
+
+// loadPublicKeyRaw wraps a raw 32-byte ed25519 public key (base64) in SPKI DER.
+function loadPublicKeyRaw(pubB64) {
+  const raw = Buffer.from(pubB64, "base64");
+  if (raw.length !== 32) throw new Error(`publisher public_key must decode to 32 bytes, got ${raw.length}`);
+  const der = Buffer.concat([Buffer.from("302a300506032b6570032100", "hex"), raw]);
+  return createPublicKey({ key: der, format: "der", type: "spki" });
+}
+
+// verifyPublisher re-checks the publisher registration + release-identity
+// signature BEFORE the registry counter-signs. build-catalog is the last gate
+// before the pinned registry key blesses an entry, so it must not rely solely on
+// validate.yml running under (recommended-not-enforced) branch protection: a
+// merge that skips validate must still not produce a first-party-trusted entry.
+function verifyPublisher(sub) {
+  const pf = join(ROOT, "publishers", `${sub.publisher}.json`);
+  if (!existsSync(pf)) throw new Error(`no registered publisher record publishers/${sub.publisher}.json`);
+  const pub = JSON.parse(readFileSync(pf, "utf8"));
+  if (sub.publisher_key_id && pub.key_id && sub.publisher_key_id !== pub.key_id) {
+    throw new Error(`publisher_key_id ${sub.publisher_key_id} != registered ${pub.key_id}`);
+  }
+  const key = loadPublicKeyRaw(pub.public_key);
+  // The publisher signs the URL-only release identity (public submission contract).
+  const payload = signedPayload(sub.slug, sub.version, sub.artifact_url);
+  const sig = Buffer.from(sub.signature || "", "base64");
+  if (sig.length !== 64 || !edVerify(null, payload, key, sig)) {
+    throw new Error("publisher signature does not verify against the registered key");
+  }
 }
 
 // Load the revoke/yank list: revoked.json is an array of
@@ -109,10 +146,20 @@ for (const file of submissions) {
     continue;
   }
 
+  // Re-verify the publisher registration + signature before counter-signing with
+  // the pinned registry key (do not trust that validate.yml gated this merge).
+  try {
+    verifyPublisher(s);
+  } catch (e) {
+    console.error(`REJECTED ${s.namespaced_slug || s.slug}@${s.version}: ${e.message}`);
+    process.exit(2);
+  }
+
   const manifest = { ...(s.manifest || {}) };
 
-  // counter-sign slug\0version\0artifact_url with the registry key.
-  const payload = signedPayload(s.slug, s.version, s.artifact_url);
+  // counter-sign the release identity with the registry key, mirroring core's
+  // SignedPayloadWithDigest (sha-bound when the manifest carries artifact_sha256).
+  const payload = signedPayload(s.slug, s.version, s.artifact_url, manifest.artifact_sha256);
   const registrySignature = edSign(null, payload, priv).toString("base64");
 
   // inject the registry signature as manifest.signature so instances verify it

@@ -17,6 +17,10 @@
 import { readFileSync, readdirSync, statSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createPrivateKey, sign as edSign, verify as edVerify, createHash, createPublicKey } from "node:crypto";
+// RA-MKT-02: re-run the SAME manifest security scan + channel/slug checks that PR
+// validation runs, here at the trust-minting (counter-sign) step. validate.mjs has
+// a main-guard so importing it is side-effect-free.
+import { scanManifest, CHANNELS, VALID_PUBLISHER, VALID_SLUG } from "./validate.mjs";
 
 const ROOT = process.cwd();
 const OUT = process.env.OUT || join(ROOT, "catalog.json");
@@ -152,6 +156,26 @@ for (const file of submissions) {
     verifyPublisher(s);
   } catch (e) {
     console.error(`REJECTED ${s.namespaced_slug || s.slug}@${s.version}: ${e.message}`);
+    process.exit(2);
+  }
+
+  // RA-MKT-02: the registry counter-signature is what every instance trusts, so
+  // the trust-minting step must NOT be weaker than PR validation. Re-run the
+  // channel/publisher/slug checks and the manifest security scan here — a
+  // submission that reaches main outside the PR path (direct push / admin merge /
+  // branch-protection gap) would otherwise be vouched for as official unscanned.
+  if (!CHANNELS.has(s.channel)) {
+    console.error(`REJECTED ${s.namespaced_slug || s.slug}@${s.version}: invalid channel "${s.channel}" (want ${[...CHANNELS].join("|")})`);
+    process.exit(2);
+  }
+  const expectedNs = `@${s.publisher}/${s.slug}`;
+  if (!VALID_PUBLISHER.test(String(s.publisher || "")) || !VALID_SLUG.test(String(s.slug || "")) || s.namespaced_slug !== expectedNs) {
+    console.error(`REJECTED ${s.namespaced_slug || s.slug}@${s.version}: publisher/slug/namespaced_slug failed validation (expected ${expectedNs})`);
+    process.exit(2);
+  }
+  const highFindings = scanManifest(s.manifest).filter((f) => f.severity === "high");
+  if (highFindings.length) {
+    console.error(`REJECTED ${s.namespaced_slug || s.slug}@${s.version}: manifest scan high findings — ${highFindings.map((f) => `${f.field}: ${f.message}`).join("; ")}`);
     process.exit(2);
   }
 

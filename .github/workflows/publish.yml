@@ -57,6 +57,14 @@ jobs:
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # RA-MKT-02: re-validate every submission on main BEFORE counter-signing, so
+      # the trust-minting step never vouches for a submission that skipped PR
+      # validation (direct push / admin merge / branch-protection gap). validate.mjs
+      # exits non-zero on any signature/scan/schema error, failing the publish.
+      # (build-catalog.mjs also re-runs the manifest scan per entry as a backstop.)
+      - name: Validate submissions (gate)
+        run: node scripts/validate.mjs
+
       - name: Assemble + counter-sign catalog.json
         if: steps.gate.outputs.enabled == 'true'
         env:

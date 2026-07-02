@@ -22,6 +22,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, statSync } from "node:fs";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
+import https from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -120,33 +121,72 @@ async function assertPublicHTTPS(url) {
   for (const a of addrs) {
     if (isBlockedIP(a.address)) throw new Error(`host resolves to a non-public address (${a.address})`);
   }
+  return addrs; // return the validated addresses so the download can PIN to them
+}
+
+// downloadPinned fetches over https PINNED to a pre-validated public IP so the
+// connection cannot be re-resolved to an internal address between the DNS check
+// and connect (DNS rebinding) — https.get's `lookup` option forces our address
+// and never re-queries DNS. It rejects redirects, keeps SNI/cert on the original
+// hostname, enforces a timeout, and STREAMS the body with a hard byte cap so an
+// oversized/slow internal target can't be buffered whole (RA-MKT-01).
+function downloadPinned(url, pinnedAddr, { maxBytes, timeoutMs }) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const req = https.get(
+      u,
+      {
+        servername: u.hostname, // SNI + cert validation stay on the real hostname
+        lookup: (_host, _opts, cb) => cb(null, pinnedAddr.address, pinnedAddr.family),
+      },
+      (res) => {
+        const code = res.statusCode || 0;
+        if (code >= 300 && code < 400) { res.destroy(); resolve({ redirect: code }); return; }
+        if (code !== 200) { res.destroy(); resolve({ status: code }); return; }
+        const chunks = [];
+        let size = 0;
+        res.on("data", (c) => {
+          size += c.length;
+          if (size > maxBytes) {
+            res.destroy();
+            reject(Object.assign(new Error(`artifact exceeds ${maxBytes} bytes`), { code: "TOO_LARGE" }));
+            return;
+          }
+          chunks.push(c);
+        });
+        res.on("end", () => resolve({ body: Buffer.concat(chunks) }));
+        res.on("error", reject);
+      },
+    );
+    req.setTimeout(timeoutMs, () => req.destroy(Object.assign(new Error("timeout"), { code: "ETIMEDOUT" })));
+    req.on("error", reject);
+  });
 }
 
 // Download the author-hosted artifact for STATIC inspection only: list entries +
 // flag obviously risky filenames. We do NOT extract into an executable layout and
 // we never run anything. Returns a short text summary (or a note on failure).
 async function staticInspectArtifact(url) {
+  let pinnedAddr;
   try {
-    await assertPublicHTTPS(url || "");
+    const addrs = await assertPublicHTTPS(url || "");
+    pinnedAddr = addrs[0]; // pin the download to this validated public address
   } catch (e) {
     return `artifact_url rejected for inspection (${(e.message || "").slice(0, 100)}); manual review advised.`;
   }
   try {
-    // redirect:manual (no following to an internal target) + a hard time cap.
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 15000);
     let res;
     try {
-      res = await fetch(url, { redirect: "manual", signal: ctrl.signal });
-    } finally {
-      clearTimeout(timer);
+      res = await downloadPinned(url, pinnedAddr, { maxBytes: 25 * 1024 * 1024, timeoutMs: 15000 });
+    } catch (e) {
+      if (e && e.code === "TOO_LARGE") return `artifact too large to inspect inline (>25MB); manual review advised.`;
+      return `artifact fetch failed (${(e.message || "").slice(0, 80)}); manual review advised.`;
     }
-    if (res.status >= 300 && res.status < 400) {
-      return `artifact_url returned a redirect (HTTP ${res.status}); not followed (SSRF-safe); manual review advised.`;
+    if (res.redirect) {
+      return `artifact_url returned a redirect (HTTP ${res.redirect}); not followed (SSRF-safe); manual review advised.`;
     }
-    if (!res.ok) return `artifact fetch failed: HTTP ${res.status}`;
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length > 25 * 1024 * 1024) return `artifact ${buf.length} bytes — too large to inspect inline; manual review advised.`;
+    if (!res.body) return `artifact fetch failed: HTTP ${res.status}`;
+    const buf = res.body;
     const dir = mkdtempSync(join(tmpdir(), "art-"));
     const tgz = join(dir, "artifact.tar.gz");
     writeFileSync(tgz, buf);
